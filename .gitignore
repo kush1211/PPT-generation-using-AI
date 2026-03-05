@@ -1,0 +1,50 @@
+# Python / Django
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environment
+venv/
+env/
+.venv/
+
+# Django
+*.sqlite3
+media/
+staticfiles/
+*.log
+
+# Environment variables — NEVER commit these
+.env
+.env.local
+.env.*.local
+
+# Node / React
+node_modules/
+dist/
+.cache/
+*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code local files
+.claude/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Pytest
+.pytest_cache/
+htmlcov/
+.coverage
