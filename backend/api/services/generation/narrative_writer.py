@@ -19,7 +19,7 @@ def write_narrative(slide_title: str, insight: dict, chart_type: str,
         audience=audience,
         tone=tone,
     )
-    return generate_text(system, user, temperature=0.6)
+    return generate_text(system, user, temperature=0.6, label=f"narrative[{slide_title[:30]}]")
 
 
 def answer_question(user_message: str, slide_content: str,
@@ -31,7 +31,7 @@ def answer_question(user_message: str, slide_content: str,
         condensed_repr=condensed_repr,
         objectives_summary=objectives_summary,
     )
-    return generate_text(system, user, temperature=0.5)
+    return generate_text(system, user, temperature=0.5, label="chat_answer")
 
 
 def rewrite_for_audience(original_narrative: str, current_audience: str,
@@ -43,4 +43,4 @@ def rewrite_for_audience(original_narrative: str, current_audience: str,
         new_audience=new_audience,
         data_context=data_context,
     )
-    return generate_text(system, user, temperature=0.6)
+    return generate_text(system, user, temperature=0.6, label="rewrite_narrative")

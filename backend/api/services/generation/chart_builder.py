@@ -35,9 +35,19 @@ def build_chart(chart_config: dict, df: pd.DataFrame, output_dir: str = None) ->
     sort_by = chart_config.get('sort_by')
     chart_type = chart_config.get('chart_type', 'bar_chart')
 
-    # Validate columns exist
-    x_col = x_col if x_col in df.columns else (df.columns[0] if len(df.columns) > 0 else '')
-    y_cols = [c for c in y_cols if c in df.columns]
+    # Validate columns exist — case-insensitive fuzzy match
+    def _match_col(name, columns):
+        if name in columns:
+            return name
+        name_norm = name.strip().lower().replace(' ', '_').replace('-', '_')
+        for c in columns:
+            if c.strip().lower().replace(' ', '_').replace('-', '_') == name_norm:
+                return c
+        return None
+
+    x_col = _match_col(x_col, df.columns) or (df.columns[0] if len(df.columns) > 0 else '')
+    y_cols = [_match_col(c, df.columns) for c in y_cols]
+    y_cols = [c for c in y_cols if c is not None]
     if not y_cols:
         numeric_cols = df.select_dtypes(include='number').columns.tolist()
         y_cols = numeric_cols[:1] if numeric_cols else []
@@ -65,7 +75,7 @@ def build_chart(chart_config: dict, df: pd.DataFrame, output_dir: str = None) ->
     filename = f"chart_{uuid.uuid4().hex[:8]}.png"
     filepath = os.path.join(output_dir, filename)
     fig.write_image(filepath, width=900, height=500, scale=1.5)
-    return f"charts/{filename}"
+    return f"charts/{filename}", fig.to_json()
 
 
 def _build_figure(chart_type, df, x_col, y_cols, y_col, color_col, title, config):

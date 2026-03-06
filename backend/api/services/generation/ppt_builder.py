@@ -239,27 +239,36 @@ def _add_executive_summary_slide(prs: Presentation, data: dict):
 
     _add_slide_title(slide, data.get('title', 'Key Takeaways'))
 
+    chart_png = data.get('chart_png', '')
     bullets = data.get('bullet_points', [])
     narrative = data.get('narrative', '')
 
-    if bullets:
-        tf = slide.shapes.add_textbox(Inches(0.5), Inches(1.3), Inches(12.3), Inches(5.5))
-        tf.text_frame.word_wrap = True
-        tf.text_frame.clear()
-        for i, bullet in enumerate(bullets[:7], 1):
-            p = tf.text_frame.paragraphs[0] if i == 1 else tf.text_frame.add_paragraph()
-            p.text = f'{i}.  {bullet}'
-            p.font.size = Pt(14)
-            p.font.color.rgb = DARK_GRAY
-            p.space_before = Pt(8)
-    elif narrative:
-        _add_narrative_box(slide, narrative, Inches(0.5), Inches(1.5), Inches(12.3), Inches(5.5))
+    if chart_png:
+        chart_full_path = settings.MEDIA_ROOT / chart_png
+        if os.path.exists(str(chart_full_path)):
+            slide.shapes.add_picture(
+                str(chart_full_path),
+                Inches(0.4), Inches(1.2),
+                Inches(12.5), Inches(4.2)
+            )
+            if narrative:
+                _add_narrative_box(slide, narrative, Inches(0.5), Inches(5.5), Inches(12.3), Inches(1.2))
+        else:
+            chart_png = ''
 
-    # Implication strip at bottom
-    box = slide.shapes.add_shape(1, 0, Inches(6.9), SLIDE_W, Inches(0.6))
-    box.fill.solid()
-    box.fill.fore_color.rgb = PRIMARY
-    box.line.fill.background()
+    if not chart_png:
+        if bullets:
+            tf = slide.shapes.add_textbox(Inches(0.5), Inches(1.3), Inches(12.3), Inches(5.5))
+            tf.text_frame.word_wrap = True
+            tf.text_frame.clear()
+            for i, bullet in enumerate(bullets[:7], 1):
+                p = tf.text_frame.paragraphs[0] if i == 1 else tf.text_frame.add_paragraph()
+                p.text = f'{i}.  {bullet}'
+                p.font.size = Pt(14)
+                p.font.color.rgb = DARK_GRAY
+                p.space_before = Pt(8)
+        elif narrative:
+            _add_narrative_box(slide, narrative, Inches(0.5), Inches(1.5), Inches(12.3), Inches(5.5))
 
     _add_footer(slide, data.get('slide_index', 0), 0)
 

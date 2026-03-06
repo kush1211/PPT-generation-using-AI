@@ -29,7 +29,7 @@ def plan_slides(insights: list[dict], objectives: dict) -> list[dict]:
     insights_json = json.dumps(insights, indent=2)
     objectives_json = json.dumps(objectives, indent=2)
     prompt = slide_planning_prompt(insights_json, objectives_json)
-    result = generate_structured(prompt, SLIDE_PLAN_SCHEMA)
+    result = generate_structured(prompt, SLIDE_PLAN_SCHEMA, label="plan_slides")
     # Re-index slides starting from 0
     for i, slide in enumerate(result):
         slide['slide_index'] = i

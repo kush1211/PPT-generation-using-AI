@@ -40,7 +40,7 @@ class SlideSerializer(serializers.ModelSerializer):
         model = Slide
         fields = [
             'id', 'slide_index', 'slide_type', 'title', 'subtitle',
-            'narrative', 'chart_png_url', 'bullet_points', 'speaker_notes',
+            'narrative', 'chart_png_url', 'chart_json', 'bullet_points', 'speaker_notes',
             'insight_ids', 'chart_config', 'created_at', 'updated_at',
         ]
 

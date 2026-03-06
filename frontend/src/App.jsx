@@ -1,12 +1,15 @@
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
-import UploadPage    from './components/Upload/UploadPage';
-import ConfigurePage from './components/Configure/ConfigurePage';
-import GeneratePage  from './components/Generate/GeneratePage';
-import ChatPage      from './components/Chat/ChatPage';
+import UploadPage      from './components/Upload/UploadPage';
+import ConfigurePage   from './components/Configure/ConfigurePage';
+import GeneratePage    from './components/Generate/GeneratePage';
+import ChatPage        from './components/Chat/ChatPage';
+import PrintView       from './components/Print/PrintView';
+import ProjectListPage from './components/Projects/ProjectListPage';
 import useProjectStore from './store/projectStore';
 import './styles/globals.css';
 
 const STEPS = [
+  { path: '/projects',  icon: '🗂', label: 'Projects',    sub: 'Past presentations',        minStatus: null },
   { path: '/upload',    icon: '📂', label: 'Upload Data',  sub: 'CSV / Excel + RFP',        minStatus: null },
   { path: '/configure', icon: '⚙️',  label: 'Configure',   sub: 'Objectives & tone',         minStatus: 'uploaded' },
   { path: '/generate',  icon: '✨',  label: 'Generate',    sub: 'AI builds your slides',     minStatus: 'configured' },
@@ -28,7 +31,7 @@ function Sidebar() {
         const isActive = location.pathname === step.path;
         const minIdx   = step.minStatus ? STATUS_ORDER.indexOf(step.minStatus) : 0;
         const isDone   = currentStatusIdx > minIdx;
-        const canClick = currentStatusIdx >= minIdx;
+        const canClick = currentStatusIdx >= minIdx || step.minStatus === null;
 
         return (
           <button
@@ -82,19 +85,25 @@ function Header() {
 export default function App() {
   return (
     <BrowserRouter>
-      <div className="app-shell">
-        <Header />
-        <Sidebar />
-        <main className="main-content">
-          <Routes>
-            <Route path="/"         element={<Navigate to="/upload" replace />} />
-            <Route path="/upload"    element={<UploadPage />} />
-            <Route path="/configure" element={<ConfigurePage />} />
-            <Route path="/generate"  element={<GeneratePage />} />
-            <Route path="/chat"      element={<ChatPage />} />
-          </Routes>
-        </main>
-      </div>
+      <Routes>
+        <Route path="/print/:projectId" element={<PrintView />} />
+        <Route path="*" element={
+          <div className="app-shell">
+            <Header />
+            <Sidebar />
+            <main className="main-content">
+              <Routes>
+                <Route path="/"          element={<Navigate to="/projects" replace />} />
+                <Route path="/projects"  element={<ProjectListPage />} />
+                <Route path="/upload"    element={<UploadPage />} />
+                <Route path="/configure" element={<ConfigurePage />} />
+                <Route path="/generate"  element={<GeneratePage />} />
+                <Route path="/chat"      element={<ChatPage />} />
+              </Routes>
+            </main>
+          </div>
+        } />
+      </Routes>
     </BrowserRouter>
   );
 }

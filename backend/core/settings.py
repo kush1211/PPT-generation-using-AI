@@ -10,7 +10,18 @@ SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-dev-key-change-in-producti
 DEBUG = os.getenv('DEBUG', 'True') == 'True'
 ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 
-GEMINI_API_KEY = os.getenv('GEMINI_API_KEY', '')
+VERTEX_AI_API_KEY = os.getenv('VERTEX_AI_API_KEY', '')
+GEMINI_MODEL = os.getenv('GEMINI_MODEL', 'gemini-2.5-flash')
+
+def _int_env(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+
+GEMINI_429_MAX_RETRIES = _int_env('GEMINI_429_MAX_RETRIES', 10)
+GEMINI_429_INITIAL_BACKOFF = _int_env('GEMINI_429_INITIAL_BACKOFF_SECONDS', 15)
+GEMINI_429_MAX_BACKOFF = _int_env('GEMINI_429_MAX_BACKOFF_SECONDS', 300)
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -106,3 +117,6 @@ REST_FRAMEWORK = {
 # File upload size limit (50 MB)
 DATA_UPLOAD_MAX_MEMORY_SIZE = 52428800
 FILE_UPLOAD_MAX_MEMORY_SIZE = 52428800
+
+# Frontend URL for Playwright PDF generation
+FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:5173')

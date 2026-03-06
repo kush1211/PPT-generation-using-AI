@@ -100,6 +100,7 @@ class Slide(models.Model):
     subtitle = models.CharField(max_length=500, blank=True)
     narrative = models.TextField(blank=True)
     chart_png = models.ImageField(upload_to='charts/', null=True, blank=True)
+    chart_json = models.TextField(blank=True, default='')
     bullet_points = models.JSONField(default=list)
     speaker_notes = models.TextField(blank=True)
     insight_ids = models.JSONField(default=list)

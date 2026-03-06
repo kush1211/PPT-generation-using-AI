@@ -3,7 +3,7 @@ import json
 import pandas as pd
 from pathlib import Path
 
-from django.http import FileResponse, Http404
+from django.http import FileResponse, Http404, HttpResponse
 from django.conf import settings
 from rest_framework import status
 from rest_framework.views import APIView
@@ -234,11 +234,16 @@ class GenerateView(APIView):
                 'comparison_dimensions': objectives_obj.comparison_dimensions,
             }
 
+            import time as _time
             file_path = str(settings.MEDIA_ROOT / data_file.file.name)
             df, _ = load_file(file_path)
 
             # 1. Extract insights
+            _t = _time.time()
+            print("\n[PIPELINE] STEP 1: Extracting insights...", flush=True)
             insights_data = extract_insights(condensed_repr, objectives, column_summary)
+            print(f"[PIPELINE] STEP 1 done — {len(insights_data)} insights ({_time.time()-_t:.1f}s)", flush=True)
+
             Insight.objects.filter(project=project).delete()
             for ins in insights_data:
                 Insight.objects.create(
@@ -253,7 +258,10 @@ class GenerateView(APIView):
                 )
 
             # 2. Plan slides
+            _t = _time.time()
+            print("\n[PIPELINE] STEP 2: Planning slides...", flush=True)
             slide_plan = plan_slides(insights_data, objectives)
+            print(f"[PIPELINE] STEP 2 done — {len(slide_plan)} slides planned ({_time.time()-_t:.1f}s)", flush=True)
 
             # 3. Generate content per slide
             Slide.objects.filter(project=project).delete()
@@ -268,23 +276,34 @@ class GenerateView(APIView):
                 bullet_points = item.get('bullet_points', [])
                 slide_idx = item.get('slide_index', 0)
 
+                print(f"\n[PIPELINE] STEP 3 — Slide {slide_idx+1}/{len(slide_plan)}: '{slide_title}' [{slide_type}]", flush=True)
+
                 primary_insight = next(
                     (insight_map[iid] for iid in insight_ids if iid in insight_map), None
                 )
 
                 chart_path = ''
+                chart_json = ''
                 chart_config = {}
 
                 if slide_type not in ('title',) and primary_insight:
                     try:
+                        _t = _time.time()
+                        print(f"[PIPELINE]   -> Selecting chart config...", flush=True)
                         chart_config = select_chart_config(primary_insight, column_map, slide_title)
-                        chart_path = build_chart(chart_config, df)
-                    except Exception:
-                        pass
+                        print(f"[PIPELINE]   -> chart_type={chart_config.get('chart_type')} ({_time.time()-_t:.1f}s)", flush=True)
+                        _t = _time.time()
+                        print(f"[PIPELINE]   -> Building chart (Plotly/kaleido)...", flush=True)
+                        chart_path, chart_json = build_chart(chart_config, df)
+                        print(f"[PIPELINE]   -> Chart built ({_time.time()-_t:.1f}s)", flush=True)
+                    except Exception as e:
+                        print(f"[PIPELINE]   -> Chart FAILED: {e}", flush=True)
 
                 narrative = ''
                 if slide_type != 'title':
                     try:
+                        _t = _time.time()
+                        print(f"[PIPELINE]   -> Writing narrative...", flush=True)
                         insight_for_narrative = primary_insight or {
                             'finding': narrative_hint, 'data_slice': {}
                         }
@@ -296,7 +315,9 @@ class GenerateView(APIView):
                             audience=objectives_obj.audience,
                             tone=objectives_obj.tone,
                         )
-                    except Exception:
+                        print(f"[PIPELINE]   -> Narrative done ({_time.time()-_t:.1f}s)", flush=True)
+                    except Exception as e:
+                        print(f"[PIPELINE]   -> Narrative FAILED: {e}", flush=True)
                         narrative = narrative_hint
 
                 slide_obj = Slide.objects.create(
@@ -313,6 +334,7 @@ class GenerateView(APIView):
                 )
                 if chart_path:
                     slide_obj.chart_png = chart_path
+                    slide_obj.chart_json = chart_json
                     slide_obj.save()
 
                 slides_for_ppt.append({
@@ -329,7 +351,10 @@ class GenerateView(APIView):
                 })
 
             # 4. Assemble PPT
+            print("\n[PIPELINE] STEP 4: Assembling PowerPoint file...", flush=True)
+            _t = _time.time()
             pptx_rel_path = build_presentation(slides_for_ppt)
+            print(f"[PIPELINE] STEP 4 done — PPT saved ({_time.time()-_t:.1f}s)", flush=True)
             project.pptx_file = pptx_rel_path
             project.status = 'ready'
             project.save()
@@ -469,3 +494,36 @@ class ChatView(APIView):
     def get(self, request, pk):
         messages = ChatMessage.objects.filter(project_id=pk).order_by('created_at')
         return Response(ChatMessageSerializer(messages, many=True).data)
+
+
+class PdfExportView(APIView):
+    def get(self, request, pk):
+        try:
+            Project.objects.get(pk=pk)
+        except Project.DoesNotExist:
+            return Response({'error': 'Not found'}, status=404)
+
+        from playwright.sync_api import sync_playwright
+        frontend_url = getattr(settings, 'FRONTEND_URL', 'http://localhost:5173')
+        url = f"{frontend_url}/print/{pk}"
+
+        try:
+            with sync_playwright() as p:
+                browser = p.chromium.launch()
+                page = browser.new_page()
+                page.goto(url, wait_until='networkidle', timeout=30000)
+                # Extra wait for Plotly charts to finish rendering
+                page.wait_for_timeout(1500)
+                pdf_bytes = page.pdf(
+                    format='A4',
+                    landscape=True,
+                    print_background=True,
+                    margin={'top': '0', 'right': '0', 'bottom': '0', 'left': '0'},
+                )
+                browser.close()
+        except Exception as e:
+            return Response({'error': f'PDF generation failed: {e}'}, status=500)
+
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="presentation_{pk}.pdf"'
+        return response

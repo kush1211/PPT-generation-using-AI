@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
+import Plot from 'react-plotly.js';
 import useProjectStore from '../../store/projectStore';
-import { generatePresentation, getSlides, downloadPresentation } from '../../services/api';
+import { generatePresentation, getSlides, downloadPresentation, downloadPdf } from '../../services/api';
 
 const PIPELINE = [
   { label: 'Extracting key insights from data',   icon: '🔍' },
@@ -11,22 +12,73 @@ const PIPELINE = [
   { label: 'Assembling PowerPoint file',           icon: '📊' },
 ];
 
+const CHIP_ICONS = {
+  title:             '🎯',
+  chart:             '📊',
+  insight:           '💡',
+  overview:          '🗂',
+  executive_summary: '📋',
+  recommendation:    '✅',
+  comparison:        '⚖️',
+};
+
+function SlideChart({ slide }) {
+  const plotData = useMemo(() => {
+    if (!slide.chart_json) return null;
+    try { return JSON.parse(slide.chart_json); } catch { return null; }
+  }, [slide.chart_json]);
+
+  if (plotData) {
+    return (
+      <Plot
+        data={plotData.data}
+        layout={{
+          ...plotData.layout,
+          autosize: true,
+          margin: { l: 28, r: 12, t: 28, b: 28 },
+          paper_bgcolor: 'transparent',
+          plot_bgcolor: 'transparent',
+          font: { size: 10 },
+        }}
+        config={{ displayModeBar: false, responsive: true }}
+        style={{ width: '100%', height: '100%' }}
+        useResizeHandler
+      />
+    );
+  }
+  if (slide.chart_png_url) {
+    return <img src={slide.chart_png_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />;
+  }
+  const type = slide.slide_type || 'chart';
+  return (
+    <div className="slide-card-preview-empty">
+      <span className="slide-card-preview-empty-icon">{CHIP_ICONS[type] || '📄'}</span>
+      <span>{type.replace(/_/g, ' ')}</span>
+    </div>
+  );
+}
+
 function SlideCard({ slide, index }) {
+  const type = slide.slide_type || 'chart';
+  const chipClass = `slide-type-chip chip-${type in CHIP_ICONS ? type : 'default'}`;
+  const preview = slide.narrative || slide.bullet_points?.[0] || '';
+
   return (
     <div className="slide-card fade-in">
       <div className="slide-card-header">
         <span className="slide-num">{index + 1}</span>
         <span className="slide-card-title">{slide.title}</span>
       </div>
-      {slide.chart_png_url && (
-        <img src={slide.chart_png_url} alt="" className="slide-card-img" />
-      )}
+
+      <div className="slide-card-preview">
+        <SlideChart slide={slide} />
+      </div>
+
       <div className="slide-card-body">
-        <span className="slide-type-chip">{slide.slide_type?.replace('_', ' ')}</span>
-        {slide.narrative && <p className="slide-narrative">{slide.narrative}</p>}
-        {!slide.narrative && slide.bullet_points?.length > 0 && (
-          <p className="slide-narrative">{slide.bullet_points[0]}</p>
-        )}
+        <span className={chipClass}>
+          {CHIP_ICONS[type] || '📄'} {type.replace(/_/g, ' ')}
+        </span>
+        {preview && <p className="slide-narrative">{preview}</p>}
       </div>
     </div>
   );
@@ -39,6 +91,13 @@ export default function GeneratePage() {
   const [generating, setGenerating] = useState(false);
   const [step,       setStep]       = useState(-1);
   const [error,      setError]      = useState('');
+
+  // Auto-fetch slides when navigating back to a ready project
+  useEffect(() => {
+    if (status === 'ready' && slides.length === 0 && projectId) {
+      getSlides(projectId).then(({ data }) => setSlides(data)).catch(() => {});
+    }
+  }, [projectId, status]);
 
   const isReady  = status === 'ready' && slides.length > 0;
 
@@ -120,6 +179,9 @@ export default function GeneratePage() {
             <span className="status-pill pill-ready">✓ {slides.length} slides generated</span>
             <a href={downloadPresentation(projectId)} download className="btn btn-primary">
               ⬇ Download .pptx
+            </a>
+            <a href={downloadPdf(projectId)} download className="btn btn-primary">
+              📄 Download PDF
             </a>
             <button className="btn btn-accent" onClick={() => navigate('/chat')}>
               💬 Chat with Slides →

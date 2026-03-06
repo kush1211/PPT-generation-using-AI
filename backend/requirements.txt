@@ -28,6 +28,9 @@ pillow>=10.4.0
 tenacity>=9.0.0
 pydantic>=2.9.0
 
+# PDF export
+playwright>=1.40.0
+
 # Testing
 pytest>=8.3.0
 pytest-django>=4.9.0

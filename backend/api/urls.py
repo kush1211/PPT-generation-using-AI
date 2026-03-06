@@ -4,7 +4,7 @@ from .views import (
     UploadDataView, UploadDocumentView, ProfileView,
     InferObjectivesView, ObjectivesView,
     GenerateView, SlidesView, DownloadView,
-    ChatView,
+    ChatView, PdfExportView,
 )
 
 urlpatterns = [
@@ -18,5 +18,6 @@ urlpatterns = [
     path('projects/<uuid:pk>/generate/', GenerateView.as_view(), name='generate'),
     path('projects/<uuid:pk>/slides/', SlidesView.as_view(), name='slides'),
     path('projects/<uuid:pk>/download/', DownloadView.as_view(), name='download'),
+    path('projects/<uuid:pk>/pdf/', PdfExportView.as_view(), name='pdf-export'),
     path('projects/<uuid:pk>/chat/', ChatView.as_view(), name='chat'),
 ]

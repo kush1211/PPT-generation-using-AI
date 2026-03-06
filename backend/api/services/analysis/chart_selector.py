@@ -36,4 +36,4 @@ SLIDE TITLE: {slide_title}
 
 Return a chart configuration. Use filter_expr as a valid pandas query string if filtering is needed (e.g., "Brand in ['A','B','C']"). Set color_col to null if not needed. Set top_n to limit rows shown (e.g., 5 for top 5)."""
 
-    return generate_structured(prompt, CHART_CONFIG_SCHEMA)
+    return generate_structured(prompt, CHART_CONFIG_SCHEMA, label=f"chart_config[{slide_title[:30]}]")
