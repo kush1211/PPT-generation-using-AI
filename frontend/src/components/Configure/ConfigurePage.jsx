@@ -47,6 +47,7 @@ export default function ConfigurePage() {
   const [saving,    setSaving]    = useState(false);
   const [error,     setError]     = useState('');
   const [saved,     setSaved]     = useState(false);
+  const [brief,     setBrief]     = useState(null);  // BriefDecomposition fields
   const [form, setForm] = useState({
     presentation_title: '',
     audience: 'executive',
@@ -72,6 +73,8 @@ export default function ConfigurePage() {
         key_metrics:          data.key_metrics          || [],
         comparison_dimensions:data.comparison_dimensions|| [],
       });
+      // Store the new brief decomposition fields (if returned by new pipeline)
+      if (data.brief) setBrief(data.brief);
       setObjectives(data);
     } catch (e) {
       setError(e.response?.data?.error || e.message);
@@ -113,6 +116,41 @@ export default function ConfigurePage() {
           </button>
         </div>
       </div>
+
+      {/* Brief Decomposition panel — shown after inference */}
+      {brief && (
+        <div className="card" style={{ marginBottom: 20, borderLeft: '4px solid #C9A84C' }}>
+          <h3 style={{ marginBottom: 16, color: '#1F3864' }}>Brief Analysis</h3>
+          <div style={{ display: 'grid', gap: 16 }}>
+            <div>
+              <div className="form-label" style={{ marginBottom: 4 }}>Domain Context</div>
+              <div style={{ padding: '8px 12px', background: '#f8f9fa', borderRadius: 6, fontSize: 14 }}>
+                {brief.domain_context}
+              </div>
+            </div>
+            <div>
+              <div className="form-label" style={{ marginBottom: 4 }}>Analytical Questions</div>
+              <ol style={{ margin: 0, paddingLeft: 20 }}>
+                {(brief.analytical_questions || []).map((q, i) => (
+                  <li key={i} style={{ fontSize: 14, marginBottom: 4, color: '#404040' }}>{q}</li>
+                ))}
+              </ol>
+            </div>
+            <div>
+              <div className="form-label" style={{ marginBottom: 4 }}>Audience &amp; Tone</div>
+              <div style={{ padding: '8px 12px', background: '#f8f9fa', borderRadius: 6, fontSize: 14 }}>
+                {brief.audience_and_tone}
+              </div>
+            </div>
+            <div>
+              <div className="form-label" style={{ marginBottom: 4 }}>Summary</div>
+              <div style={{ padding: '8px 12px', background: '#f8f9fa', borderRadius: 6, fontSize: 14, lineHeight: 1.6 }}>
+                {brief.full_summary}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="card" style={{ marginBottom: 20 }}>
         <h3 style={{ marginBottom: 20 }}>Presentation Settings</h3>

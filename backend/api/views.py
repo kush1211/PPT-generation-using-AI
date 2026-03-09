@@ -10,7 +10,10 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 
-from .models import Project, DataFile, RFPDocument, ObjectivesConfig, Insight, Slide, ChatMessage
+from .models import (
+    Project, DataFile, RFPDocument, ObjectivesConfig,
+    BriefDecomposition, SheetGroup, Insight, Slide, ChatMessage,
+)
 from .serializers import (
     ProjectSerializer, ProjectCreateSerializer, DataFileSerializer,
     RFPDocumentSerializer, ObjectivesConfigSerializer, InsightSerializer,
@@ -19,13 +22,16 @@ from .serializers import (
 from .services.data_ingestion.csv_excel_loader import load_file
 from .services.data_ingestion.document_parser import parse_document
 from .services.data_ingestion.data_profiler import profile_dataframe
+from .services.data_ingestion.multi_sheet_loader import load_all_sheets, extract_sheet_metadata
 from .services.analysis.objective_inferrer import infer_objectives
+from .services.analysis.brief_decomposer import decompose_brief
 from .services.analysis.insight_extractor import extract_insights
 from .services.analysis.chart_selector import select_chart_config
 from .services.generation.slide_planner import plan_slides
 from .services.generation.narrative_writer import write_narrative
 from .services.generation.chart_builder import build_chart
 from .services.generation.ppt_builder import build_presentation
+from .services.generation.pipeline_orchestrator import run_generation_pipeline
 from .services.chat.intent_classifier import classify_intent
 from .services.chat.chat_handler import handle_chat
 
@@ -79,9 +85,18 @@ class UploadDataView(APIView):
         data_file.save()
 
         file_path = str(settings.MEDIA_ROOT / data_file.file.name)
-        df, column_map = load_file(file_path)
-        profile = profile_dataframe(df, column_map)
 
+        # New pipeline: load all sheets and extract per-sheet metadata (Step 1)
+        sheet_dfs = load_all_sheets(file_path)
+        sheet_metadata = extract_sheet_metadata(sheet_dfs)
+        data_file.sheet_metadata = sheet_metadata
+
+        # Backward compat: profile the primary (largest) sheet for chat handler
+        from .services.data_ingestion.multi_sheet_loader import get_primary_sheet
+        primary_df = get_primary_sheet(sheet_dfs)
+        from .services.data_ingestion.csv_excel_loader import _infer_column_types
+        column_map = _infer_column_types(primary_df)
+        profile = profile_dataframe(primary_df, column_map)
         data_file.column_map = column_map
         data_file.profile = profile
         data_file.save()
@@ -91,6 +106,8 @@ class UploadDataView(APIView):
 
         return Response({
             'column_map': column_map,
+            'sheet_count': len(sheet_dfs),
+            'sheet_names': list(sheet_dfs.keys()),
             'profile': {
                 'shape': profile['shape'],
                 'columns': profile['columns'],
@@ -154,31 +171,62 @@ class InferObjectivesView(APIView):
         except DataFile.DoesNotExist:
             return Response({'error': 'Upload data file first'}, status=400)
 
-        condensed_repr = data_file.profile.get('condensed_repr', '')
         rfp_text = ''
         try:
             rfp_text = project.rfp_document.parsed_text
         except RFPDocument.DoesNotExist:
             pass
 
-        result = infer_objectives(rfp_text, condensed_repr)
+        # Step 0: Brief Decomposition (replaces infer_objectives)
+        sheet_metadata = data_file.sheet_metadata or {}
+        if not sheet_metadata:
+            # Fallback: build minimal metadata summary from legacy profile
+            condensed_repr = data_file.profile.get('condensed_repr', '')
+            sheet_metadata = {'Sheet1': {'columns': list(data_file.column_map.get('metrics', []) +
+                                                          data_file.column_map.get('dimensions', []) +
+                                                          data_file.column_map.get('dates', [])),
+                                          'row_count': data_file.profile.get('shape', [0])[0],
+                                          'sample_top': data_file.profile.get('sample_rows', [])[:2],
+                                          'inferred_dtypes': {}, 'unique_counts': {}, 'null_pct': {}}}
 
+        result = decompose_brief(rfp_text, sheet_metadata)
+
+        # Persist BriefDecomposition
+        BriefDecomposition.objects.update_or_create(
+            project=project,
+            defaults={
+                'domain_context': result.get('domain_context', ''),
+                'analytical_questions': result.get('analytical_questions', []),
+                'audience_and_tone': result.get('audience_and_tone', ''),
+                'full_summary': result.get('full_summary', ''),
+            }
+        )
+
+        # Also persist ObjectivesConfig for backward compat (audience/tone/title)
         obj, _ = ObjectivesConfig.objects.update_or_create(
             project=project,
             defaults={
                 'presentation_title': result.get('presentation_title', 'Presentation'),
                 'audience': result.get('audience', 'executive'),
                 'tone': result.get('tone', 'formal'),
-                'primary_objectives': result.get('primary_objectives', []),
-                'key_metrics': result.get('key_metrics', []),
-                'comparison_dimensions': result.get('comparison_dimensions', []),
+                'primary_objectives': [],
+                'key_metrics': [],
+                'comparison_dimensions': [],
             }
         )
 
         project.status = 'configured'
         project.save()
 
-        return Response(ObjectivesConfigSerializer(obj).data)
+        # Return combined response (superset of old ObjectivesConfigSerializer shape)
+        response_data = ObjectivesConfigSerializer(obj).data
+        response_data['brief'] = {
+            'domain_context': result.get('domain_context', ''),
+            'analytical_questions': result.get('analytical_questions', []),
+            'audience_and_tone': result.get('audience_and_tone', ''),
+            'full_summary': result.get('full_summary', ''),
+        }
+        return Response(response_data)
 
 
 class ObjectivesView(APIView):
@@ -212,160 +260,33 @@ class GenerateView(APIView):
 
         try:
             data_file = project.data_file
-            objectives_obj = project.objectives
-        except (DataFile.DoesNotExist, ObjectivesConfig.DoesNotExist):
-            return Response({'error': 'Upload data and configure objectives first'}, status=400)
+        except DataFile.DoesNotExist:
+            return Response({'error': 'Upload data file first'}, status=400)
+
+        try:
+            project.objectives
+        except ObjectivesConfig.DoesNotExist:
+            return Response({'error': 'Configure objectives first'}, status=400)
+
+        try:
+            project.brief
+        except BriefDecomposition.DoesNotExist:
+            return Response({'error': 'Run "Infer Objectives" first to decompose the brief'}, status=400)
 
         project.status = 'generating'
         project.save()
 
         try:
-            profile = data_file.profile
-            column_map = data_file.column_map
-            condensed_repr = profile.get('condensed_repr', '')
-            column_summary = profile.get('column_summary', {})
-
-            objectives = {
-                'presentation_title': objectives_obj.presentation_title,
-                'audience': objectives_obj.audience,
-                'tone': objectives_obj.tone,
-                'primary_objectives': objectives_obj.primary_objectives,
-                'key_metrics': objectives_obj.key_metrics,
-                'comparison_dimensions': objectives_obj.comparison_dimensions,
-            }
-
-            import time as _time
-            file_path = str(settings.MEDIA_ROOT / data_file.file.name)
-            df, _ = load_file(file_path)
-
-            # 1. Extract insights
-            _t = _time.time()
-            print("\n[PIPELINE] STEP 1: Extracting insights...", flush=True)
-            insights_data = extract_insights(condensed_repr, objectives, column_summary)
-            print(f"[PIPELINE] STEP 1 done — {len(insights_data)} insights ({_time.time()-_t:.1f}s)", flush=True)
-
-            Insight.objects.filter(project=project).delete()
-            for ins in insights_data:
-                Insight.objects.create(
-                    project=project,
-                    insight_id=ins['insight_id'],
-                    title=ins['title'],
-                    finding=ins['finding'],
-                    magnitude=ins['magnitude'],
-                    data_slice=ins.get('data_slice', {}),
-                    chart_hint=ins['chart_hint'],
-                    priority=ins['priority'],
-                )
-
-            # 2. Plan slides
-            _t = _time.time()
-            print("\n[PIPELINE] STEP 2: Planning slides...", flush=True)
-            slide_plan = plan_slides(insights_data, objectives)
-            print(f"[PIPELINE] STEP 2 done — {len(slide_plan)} slides planned ({_time.time()-_t:.1f}s)", flush=True)
-
-            # 3. Generate content per slide
-            Slide.objects.filter(project=project).delete()
-            slides_for_ppt = []
-            insight_map = {ins['insight_id']: ins for ins in insights_data}
-
-            for item in slide_plan:
-                slide_type = item.get('slide_type', 'chart')
-                slide_title = item.get('title', '')
-                narrative_hint = item.get('narrative_hint', '')
-                insight_ids = item.get('insight_ids', [])
-                bullet_points = item.get('bullet_points', [])
-                slide_idx = item.get('slide_index', 0)
-
-                print(f"\n[PIPELINE] STEP 3 — Slide {slide_idx+1}/{len(slide_plan)}: '{slide_title}' [{slide_type}]", flush=True)
-
-                primary_insight = next(
-                    (insight_map[iid] for iid in insight_ids if iid in insight_map), None
-                )
-
-                chart_path = ''
-                chart_json = ''
-                chart_config = {}
-
-                if slide_type not in ('title',) and primary_insight:
-                    try:
-                        _t = _time.time()
-                        print(f"[PIPELINE]   -> Selecting chart config...", flush=True)
-                        chart_config = select_chart_config(primary_insight, column_map, slide_title)
-                        print(f"[PIPELINE]   -> chart_type={chart_config.get('chart_type')} ({_time.time()-_t:.1f}s)", flush=True)
-                        _t = _time.time()
-                        print(f"[PIPELINE]   -> Building chart (Plotly/kaleido)...", flush=True)
-                        chart_path, chart_json = build_chart(chart_config, df)
-                        print(f"[PIPELINE]   -> Chart built ({_time.time()-_t:.1f}s)", flush=True)
-                    except Exception as e:
-                        print(f"[PIPELINE]   -> Chart FAILED: {e}", flush=True)
-
-                narrative = ''
-                if slide_type != 'title':
-                    try:
-                        _t = _time.time()
-                        print(f"[PIPELINE]   -> Writing narrative...", flush=True)
-                        insight_for_narrative = primary_insight or {
-                            'finding': narrative_hint, 'data_slice': {}
-                        }
-                        narrative = write_narrative(
-                            slide_title=slide_title,
-                            insight=insight_for_narrative,
-                            chart_type=chart_config.get('chart_type', 'bar_chart'),
-                            narrative_hint=narrative_hint,
-                            audience=objectives_obj.audience,
-                            tone=objectives_obj.tone,
-                        )
-                        print(f"[PIPELINE]   -> Narrative done ({_time.time()-_t:.1f}s)", flush=True)
-                    except Exception as e:
-                        print(f"[PIPELINE]   -> Narrative FAILED: {e}", flush=True)
-                        narrative = narrative_hint
-
-                slide_obj = Slide.objects.create(
-                    project=project,
-                    slide_index=slide_idx,
-                    slide_type=slide_type,
-                    title=slide_title,
-                    subtitle=item.get('subtitle', ''),
-                    narrative=narrative,
-                    bullet_points=bullet_points,
-                    speaker_notes=narrative_hint,
-                    insight_ids=insight_ids,
-                    chart_config=chart_config,
-                )
-                if chart_path:
-                    slide_obj.chart_png = chart_path
-                    slide_obj.chart_json = chart_json
-                    slide_obj.save()
-
-                slides_for_ppt.append({
-                    'slide_index': slide_idx,
-                    'slide_type': slide_type,
-                    'title': slide_title,
-                    'subtitle': item.get('subtitle', ''),
-                    'narrative': narrative,
-                    'chart_png': chart_path,
-                    'bullet_points': bullet_points,
-                    'speaker_notes': narrative_hint,
-                    'insight_ids': insight_ids,
-                    'chart_config': chart_config,
-                })
-
-            # 4. Assemble PPT
-            print("\n[PIPELINE] STEP 4: Assembling PowerPoint file...", flush=True)
-            _t = _time.time()
-            pptx_rel_path = build_presentation(slides_for_ppt)
-            print(f"[PIPELINE] STEP 4 done — PPT saved ({_time.time()-_t:.1f}s)", flush=True)
-            project.pptx_file = pptx_rel_path
-            project.status = 'ready'
-            project.save()
-
+            result = run_generation_pipeline(project)
+            pptx_rel_path = result['pptx_path']
             return Response({
                 'status': 'ready',
-                'slide_count': len(slides_for_ppt),
+                'slide_count': result['slide_count'],
                 'pptx_url': request.build_absolute_uri(f'/media/{pptx_rel_path}'),
             })
-
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             project.status = 'error'
             project.save()
             return Response({'error': str(e)}, status=500)

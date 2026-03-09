@@ -173,7 +173,7 @@ def _handle_filter_compare(intent, project, slides, condensed_repr, objectives):
 def _get_objectives_dict(project) -> dict:
     try:
         obj = project.objectives
-        return {
+        result = {
             'presentation_title': obj.presentation_title,
             'audience': obj.audience,
             'tone': obj.tone,
@@ -181,11 +181,30 @@ def _get_objectives_dict(project) -> dict:
             'key_metrics': obj.key_metrics,
             'comparison_dimensions': obj.comparison_dimensions,
         }
+        # Augment with richer brief context from new pipeline
+        try:
+            brief = project.brief
+            result['full_summary'] = brief.full_summary
+            result['analytical_questions'] = brief.analytical_questions
+            result['domain_context'] = brief.domain_context
+        except Exception:
+            pass
+        return result
     except Exception:
         return {}
 
 
 def _load_dataframe(project) -> pd.DataFrame | None:
+    """Load the primary sheet DataFrame from disk (preferred) or sample rows (fallback)."""
+    try:
+        from django.conf import settings
+        from ..data_ingestion.multi_sheet_loader import load_all_sheets, get_primary_sheet
+        file_path = str(settings.MEDIA_ROOT / project.data_file.file.name)
+        sheet_dfs = load_all_sheets(file_path)
+        return get_primary_sheet(sheet_dfs)
+    except Exception:
+        pass
+    # Fallback: reconstruct from stored sample rows
     try:
         profile = project.data_file.profile
         sample = profile.get('sample_rows', [])
