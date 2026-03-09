@@ -57,7 +57,7 @@ export default function ConfigurePage() {
     comparison_dimensions: [],
   });
 
-  useEffect(() => { if (!projectId) navigate('/upload'); }, [projectId, navigate]);
+  useEffect(() => { if (!projectId) navigate('/projects'); }, [projectId, navigate]);
 
   const set = (key, val) => setForm(f => ({ ...f, [key]: val }));
 
@@ -214,7 +214,7 @@ export default function ConfigurePage() {
           {saving ? <><span className="spinner" /> Saving…</> : '💾 Save Objectives'}
         </button>
         {saved && (
-          <button className="btn btn-accent btn-lg" onClick={() => navigate('/generate')}>
+          <button className="btn btn-accent btn-lg" onClick={() => navigate(`/projects/${projectId}/generate`)}>
             Generate Presentation →
           </button>
         )}

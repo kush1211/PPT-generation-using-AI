@@ -61,6 +61,11 @@ class ProjectDetailView(APIView):
         serializer = ProjectSerializer(project, context={'request': request})
         return Response(serializer.data)
 
+    def delete(self, request, pk):
+        project = self.get_object(pk)
+        project.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
 
 class UploadDataView(APIView):
     parser_classes = [MultiPartParser, FormParser]

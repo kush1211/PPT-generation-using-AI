@@ -115,7 +115,7 @@ export default function ChatPage() {
   const messagesEndRef = useRef(null);
 
   useEffect(() => {
-    if (!projectId) navigate('/upload');
+    if (!projectId) navigate('/projects');
     if (projectId) {
       getChatHistory(projectId).then(({ data }) => setChatHistory(data));
     }

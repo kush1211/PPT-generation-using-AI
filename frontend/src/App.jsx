@@ -1,4 +1,5 @@
-import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate, useParams, Outlet } from 'react-router-dom';
+import { useEffect } from 'react';
 import UploadPage      from './components/Upload/UploadPage';
 import ConfigurePage   from './components/Configure/ConfigurePage';
 import GeneratePage    from './components/Generate/GeneratePage';
@@ -6,19 +7,20 @@ import ChatPage        from './components/Chat/ChatPage';
 import PrintView       from './components/Print/PrintView';
 import ProjectListPage from './components/Projects/ProjectListPage';
 import useProjectStore from './store/projectStore';
+import { getProject } from './services/api';
 import './styles/globals.css';
 
-const STEPS = [
-  { path: '/projects',  icon: '🗂', label: 'Projects',    sub: 'Past presentations',        minStatus: null },
-  { path: '/upload',    icon: '📂', label: 'Upload Data',  sub: 'CSV / Excel + RFP',        minStatus: null },
-  { path: '/configure', icon: '⚙️',  label: 'Configure',   sub: 'Objectives & tone',         minStatus: 'uploaded' },
-  { path: '/generate',  icon: '✨',  label: 'Generate',    sub: 'AI builds your slides',     minStatus: 'configured' },
-  { path: '/chat',      icon: '💬',  label: 'Chat',        sub: 'Refine conversationally',   minStatus: 'ready' },
+const PROJECT_STEPS = [
+  { pathKey: 'upload',    icon: '📂', label: 'Upload Data',  sub: 'CSV / Excel + RFP',        minStatus: null },
+  { pathKey: 'configure', icon: '⚙️',  label: 'Configure',   sub: 'Objectives & tone',         minStatus: 'uploaded' },
+  { pathKey: 'generate',  icon: '✨',  label: 'Generate',    sub: 'AI builds your slides',     minStatus: 'configured' },
+  { pathKey: 'chat',      icon: '💬',  label: 'Chat',        sub: 'Refine conversationally',   minStatus: 'ready' },
 ];
 
 const STATUS_ORDER = ['uploading', 'uploaded', 'configured', 'generating', 'ready'];
 
-function Sidebar() {
+function ProjectSidebar() {
+  const { projectId } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
   const { status } = useProjectStore();
@@ -27,17 +29,31 @@ function Sidebar() {
 
   return (
     <aside className="sidebar">
-      {STEPS.map((step) => {
-        const isActive = location.pathname === step.path;
+      <button
+        className="sidebar-step"
+        onClick={() => navigate('/projects')}
+      >
+        <span className="step-icon">←</span>
+        <span className="step-info">
+          <span className="step-label">Back to Projects</span>
+          <span className="step-sub">All presentations</span>
+        </span>
+      </button>
+
+      <div className="sidebar-divider" />
+
+      {PROJECT_STEPS.map((step) => {
+        const path = `/projects/${projectId}/${step.pathKey}`;
+        const isActive = location.pathname === path;
         const minIdx   = step.minStatus ? STATUS_ORDER.indexOf(step.minStatus) : 0;
         const isDone   = currentStatusIdx > minIdx;
         const canClick = currentStatusIdx >= minIdx || step.minStatus === null;
 
         return (
           <button
-            key={step.path}
+            key={step.pathKey}
             className={`sidebar-step ${isActive ? 'active' : ''} ${isDone && !isActive ? 'done' : ''}`}
-            onClick={() => canClick && navigate(step.path)}
+            onClick={() => canClick && navigate(path)}
             style={{ cursor: canClick ? 'pointer' : 'default', opacity: canClick ? 1 : 0.4 }}
           >
             <span className="step-icon">{isDone && !isActive ? '✓' : step.icon}</span>
@@ -82,27 +98,55 @@ function Header() {
   );
 }
 
+function ProjectShell() {
+  const { projectId } = useParams();
+  const { projectId: storeId, setProject } = useProjectStore();
+
+  useEffect(() => {
+    if (!projectId) return;
+    if (storeId === projectId) return;
+    getProject(projectId)
+      .then(({ data }) => setProject(data.id, data.status))
+      .catch(() => {});
+  }, [projectId, storeId, setProject]);
+
+  return (
+    <div className="app-shell">
+      <Header />
+      <ProjectSidebar />
+      <main className="main-content">
+        <Outlet />
+      </main>
+    </div>
+  );
+}
+
+function ListLayout() {
+  return (
+    <div className="app-shell app-shell--no-sidebar">
+      <Header />
+      <main className="main-content">
+        <ProjectListPage />
+      </main>
+    </div>
+  );
+}
+
 export default function App() {
   return (
     <BrowserRouter>
       <Routes>
         <Route path="/print/:projectId" element={<PrintView />} />
-        <Route path="*" element={
-          <div className="app-shell">
-            <Header />
-            <Sidebar />
-            <main className="main-content">
-              <Routes>
-                <Route path="/"          element={<Navigate to="/projects" replace />} />
-                <Route path="/projects"  element={<ProjectListPage />} />
-                <Route path="/upload"    element={<UploadPage />} />
-                <Route path="/configure" element={<ConfigurePage />} />
-                <Route path="/generate"  element={<GeneratePage />} />
-                <Route path="/chat"      element={<ChatPage />} />
-              </Routes>
-            </main>
-          </div>
-        } />
+        <Route path="/"          element={<Navigate to="/projects" replace />} />
+        <Route path="/projects" element={<ListLayout />} />
+        <Route path="/projects/:projectId" element={<ProjectShell />}>
+          <Route index element={<Navigate to="upload" replace />} />
+          <Route path="upload"    element={<UploadPage />} />
+          <Route path="configure" element={<ConfigurePage />} />
+          <Route path="generate" element={<GeneratePage />} />
+          <Route path="chat"     element={<ChatPage />} />
+        </Route>
+        <Route path="*" element={<Navigate to="/projects" replace />} />
       </Routes>
     </BrowserRouter>
   );

@@ -183,7 +183,7 @@ export default function GeneratePage() {
             <a href={downloadPdf(projectId)} download className="btn btn-primary">
               📄 Download PDF
             </a>
-            <button className="btn btn-accent" onClick={() => navigate('/chat')}>
+            <button className="btn btn-accent" onClick={() => navigate(`/projects/${projectId}/chat`)}>
               💬 Chat with Slides →
             </button>
           </div>

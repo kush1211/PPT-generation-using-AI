@@ -8,6 +8,7 @@ const api = axios.create({
 export const listProjects = () => api.get('/projects/');
 export const createProject = (title = '') => api.post('/projects/', { title });
 export const getProject = (id) => api.get(`/projects/${id}/`);
+export const deleteProject = (id) => api.delete(`/projects/${id}/`);
 
 export const uploadData = (projectId, file) => {
   const formData = new FormData();

@@ -1,13 +1,16 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import useProjectStore from '../../store/projectStore';
-import { listProjects, downloadPresentation } from '../../services/api';
+import { listProjects, createProject, deleteProject, downloadPresentation } from '../../services/api';
 
-const STATUS_DEST = {
-  ready:      '/generate',
-  configured: '/generate',
-  uploaded:   '/configure',
+const STATUS_STEP = {
+  ready:      'generate',
+  configured: 'generate',
+  generating: 'generate',
+  uploaded:   'configure',
+  error:      'generate',
 };
+const DEFAULT_STEP = 'upload';
 
 const PILL_MAP = {
   ready:      { cls: 'pill-ready',      label: 'Ready' },
@@ -28,25 +31,63 @@ export default function ProjectListPage() {
   const navigate = useNavigate();
   const store = useProjectStore();
   const [projects, setProjects] = useState([]);
-  const [loading, setLoading]   = useState(true);
-  const [error, setError]       = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [modalOpen, setModalOpen] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [deletingId, setDeletingId] = useState(null);
 
-  useEffect(() => {
+  const loadProjects = () => {
+    setLoading(true);
     listProjects()
       .then(({ data }) => setProjects(data))
       .catch(() => setError('Failed to load projects.'))
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    loadProjects();
   }, []);
 
   const openProject = (project) => {
     store.reset();
     store.setProject(project.id, project.status);
-    navigate(STATUS_DEST[project.status] || '/upload');
+    const step = STATUS_STEP[project.status] || DEFAULT_STEP;
+    navigate(`/projects/${project.id}/${step}`);
   };
 
-  const newProject = () => {
-    store.reset();
-    navigate('/upload');
+  const handleCreateProject = async (e) => {
+    e.preventDefault();
+    const name = newName.trim() || 'Untitled Project';
+    setCreating(true);
+    setError('');
+    try {
+      const { data } = await createProject(name);
+      store.reset();
+      store.setProject(data.id, data.status);
+      setModalOpen(false);
+      setNewName('');
+      navigate(`/projects/${data.id}/upload`);
+    } catch (e) {
+      setError(e.response?.data?.error || e.message || 'Failed to create project.');
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const handleDelete = async (e, projectId) => {
+    e.stopPropagation();
+    if (!window.confirm('Delete this project? This cannot be undone.')) return;
+    setDeletingId(projectId);
+    try {
+      await deleteProject(projectId);
+      setProjects((prev) => prev.filter((p) => p.id !== projectId));
+    } catch {
+      setError('Failed to delete project.');
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   return (
@@ -56,7 +97,7 @@ export default function ProjectListPage() {
           <div className="page-title">Projects</div>
           <div className="page-sub">All your past and in-progress presentations.</div>
         </div>
-        <button className="btn btn-primary" onClick={newProject}>+ New Project</button>
+        <button className="btn btn-primary" onClick={() => setModalOpen(true)}>+ New Project</button>
       </div>
 
       {error && <div className="banner banner-error"><span className="banner-icon">⚠️</span>{error}</div>}
@@ -67,8 +108,8 @@ export default function ProjectListPage() {
         <div className="card" style={{ textAlign: 'center', padding: '48px 24px' }}>
           <div style={{ fontSize: 40, marginBottom: 12 }}>📂</div>
           <h3 style={{ marginBottom: 8 }}>No projects yet</h3>
-          <p className="text-muted" style={{ marginBottom: 20 }}>Upload a dataset to create your first AI-generated presentation.</p>
-          <button className="btn btn-primary" onClick={newProject}>+ New Project</button>
+          <p className="text-muted" style={{ marginBottom: 20 }}>Create a project and upload a dataset to build your first AI-generated presentation.</p>
+          <button className="btn btn-primary" onClick={() => setModalOpen(true)}>+ New Project</button>
         </div>
       ) : (
         <div className="project-list">
@@ -95,6 +136,14 @@ export default function ProjectListPage() {
                       ⬇ .pptx
                     </a>
                   )}
+                  <button
+                    className="btn btn-outline btn-danger"
+                    onClick={(e) => handleDelete(e, p.id)}
+                    disabled={deletingId === p.id}
+                    title="Delete project"
+                  >
+                    {deletingId === p.id ? '…' : '🗑 Delete'}
+                  </button>
                   <button className="btn btn-primary" onClick={() => openProject(p)}>
                     Open →
                   </button>
@@ -102,6 +151,34 @@ export default function ProjectListPage() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {modalOpen && (
+        <div className="modal-overlay" onClick={() => !creating && setModalOpen(false)}>
+          <div className="modal card" onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ marginBottom: 8 }}>New Project</h3>
+            <p className="text-muted" style={{ marginBottom: 16, fontSize: 14 }}>Give your project a name. You can upload data in the next step.</p>
+            <form onSubmit={handleCreateProject}>
+              <label className="form-label">Project name</label>
+              <input
+                className="input"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                placeholder="e.g. Q3 Competitor Analysis"
+                autoFocus
+                style={{ marginBottom: 20 }}
+              />
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                <button type="button" className="btn btn-secondary" onClick={() => !creating && setModalOpen(false)} disabled={creating}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary" disabled={creating}>
+                  {creating ? <><span className="spinner" /> Creating…</> : 'Create & Open'}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>

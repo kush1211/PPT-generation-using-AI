@@ -1,7 +1,7 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import useProjectStore from '../../store/projectStore';
-import { createProject, uploadData, uploadDocument } from '../../services/api';
+import { uploadData, uploadDocument } from '../../services/api';
 
 function DropZone({ label, accept, acceptLabel, icon, file, onFile, optional }) {
   const [dragging, setDragging] = useState(false);
@@ -43,29 +43,31 @@ function DropZone({ label, accept, acceptLabel, icon, file, onFile, optional }) 
 export default function UploadPage() {
   const navigate = useNavigate();
   const store = useProjectStore();
+  const projectId = store.projectId;
 
   const [dataFile, setDataFile] = useState(null);
   const [docFile,  setDocFile]  = useState(null);
-  const [title,    setTitle]    = useState('');
   const [loading,  setLoading]  = useState(false);
   const [error,    setError]    = useState('');
   const [profile,  setProfile]  = useState(null);
   const [columnMap, setColumnMap] = useState(null);
 
+  useEffect(() => {
+    if (!projectId) navigate('/projects');
+  }, [projectId, navigate]);
+
   const handleUpload = async () => {
+    if (!projectId) return navigate('/projects');
     if (!dataFile) return setError('Please select a data file (CSV or Excel).');
     setError('');
     setLoading(true);
     try {
-      const { data: proj } = await createProject(title || 'My Presentation');
-      store.setProject(proj.id, proj.status);
-
-      const { data: result } = await uploadData(proj.id, dataFile);
+      const { data: result } = await uploadData(projectId, dataFile);
       store.setProfile(result.profile, result.column_map);
       setProfile(result.profile);
       setColumnMap(result.column_map);
 
-      if (docFile) await uploadDocument(proj.id, docFile);
+      if (docFile) await uploadDocument(projectId, docFile);
 
       store.setStatus('uploaded');
     } catch (e) {
@@ -107,13 +109,6 @@ export default function UploadPage() {
           onFile={setDocFile}
           optional
         />
-      </div>
-
-      <div className="card" style={{ marginBottom: 20 }}>
-        <label className="form-label">Presentation Title</label>
-        <input className="input" value={title} onChange={e => setTitle(e.target.value)}
-          placeholder="e.g. Q3 Competitor Analysis, Consumer Insights 2026" />
-        <div className="form-hint">Optional — AI will suggest one from your documents if left blank.</div>
       </div>
 
       <button className="btn btn-primary btn-lg" onClick={handleUpload} disabled={loading || !dataFile}>
@@ -168,7 +163,7 @@ export default function UploadPage() {
             )}
           </div>
 
-          <button className="btn btn-accent btn-lg" onClick={() => navigate('/configure')}>
+          <button className="btn btn-accent btn-lg" onClick={() => navigate(`/projects/${store.projectId}/configure`)}>
             Continue to Configure →
           </button>
         </div>
