@@ -52,7 +52,7 @@ def classify_sheets(sheet_metadata: dict, domain_context: str) -> dict:
         dict mapping sheet_name -> classification result
     """
     results = {}
-    max_workers = min(6, len(sheet_metadata))
+    max_workers = min(1, len(sheet_metadata))
 
     with ThreadPoolExecutor(max_workers=max(1, max_workers)) as executor:
         future_to_sheet = {

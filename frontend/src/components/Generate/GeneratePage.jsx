@@ -102,7 +102,7 @@ export default function GeneratePage() {
   const isReady  = status === 'ready' && slides.length > 0;
 
   const handleGenerate = async () => {
-    setGenerating(true); setError(''); setStep(0);
+    setGenerating(true); setError(''); setStep(0); setSlides([]);
 
     const timer = setInterval(() => {
       setStep(s => (s < PIPELINE.length - 1 ? s + 1 : s));
@@ -185,6 +185,9 @@ export default function GeneratePage() {
             </a>
             <button className="btn btn-accent" onClick={() => navigate(`/projects/${projectId}/chat`)}>
               💬 Chat with Slides →
+            </button>
+            <button className="btn btn-secondary" onClick={handleGenerate}>
+              🔄 Regenerate
             </button>
           </div>
 

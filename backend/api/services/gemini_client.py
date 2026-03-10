@@ -1,75 +1,79 @@
 """
-Gemini client via Vertex AI express mode.
-Auth: VERTEX_AI_API_KEY only (no service account / GOOGLE_CLOUD_PROJECT needed).
-429 handling per: https://cloud.google.com/vertex-ai/generative-ai/docs/error-code-429
+Gemini client via LangChain + Vertex AI Express mode + LangSmith tracing.
+
+Auth: injects a genai.Client(vertexai=True, api_key=...) directly into
+ChatGoogleGenerativeAI so that Vertex AI Express mode (API-key-based auth)
+is preserved — same as the original google-genai usage.
+
+LangSmith traces all calls automatically when LANGSMITH_TRACING=true in .env.
+429 handling: truncated exponential backoff with jitter.
 """
 from __future__ import annotations
 
-import json
 import logging
 import random
 import time
 
 from google import genai
-from google.genai import errors as genai_errors
-from google.genai import types
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.runnables import RunnableConfig
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
-RATE_LIMIT_STATUS = 429
-
 
 def _backoff_seconds(attempt: int) -> float:
-    """Truncated exponential backoff with jitter (per Vertex AI 429 doc)."""
+    """Truncated exponential backoff with jitter."""
     raw = min(settings.GEMINI_429_INITIAL_BACKOFF * (2 ** attempt), settings.GEMINI_429_MAX_BACKOFF)
     jitter = raw * (0.5 + 0.5 * random.random())
     return max(1.0, jitter)
 
 
-def _log_429(exc: Exception, attempt: int) -> None:
-    msg = str(exc)
-    details = getattr(exc, "message", None) or getattr(exc, "details", None)
-    extra = f" | details: {details}" if details and str(details) != msg else ""
-    logger.warning("429 RESOURCE_EXHAUSTED (attempt %s): %s%s", attempt + 1, msg, extra)
-
-
 def _is_rate_limit(exc: Exception) -> bool:
-    if isinstance(exc, genai_errors.ClientError):
-        return (getattr(exc, "code", None) == RATE_LIMIT_STATUS) or (
-            "RESOURCE_EXHAUSTED" in (getattr(exc, "status", None) or "")
-        )
-    return "429" in str(exc).upper() or "RESOURCE_EXHAUSTED" in str(exc).upper()
+    msg = str(exc).upper()
+    return "429" in msg or "RESOURCE_EXHAUSTED" in msg
 
 
-def _get_client() -> genai.Client:
+def _get_vertex_client() -> genai.Client:
+    """Return a Vertex AI Express client (API-key auth, no service account needed)."""
     api_key = (settings.VERTEX_AI_API_KEY or "").strip()
     if not api_key:
         raise ValueError("Set VERTEX_AI_API_KEY in .env")
     return genai.Client(vertexai=True, api_key=api_key)
 
 
-def _call_with_retry(client: genai.Client, model: str, contents, config: types.GenerateContentConfig, label: str = "") -> str:
-    """Shared retry loop for all generate calls."""
+def _make_llm(temperature: float = 0.3, **extra) -> ChatGoogleGenerativeAI:
+    """Build a ChatGoogleGenerativeAI with a pre-configured Vertex AI Express client."""
+    return ChatGoogleGenerativeAI(
+        model=settings.GEMINI_MODEL,
+        client=_get_vertex_client(),   # injects express-mode client directly
+        temperature=temperature,
+        thinking_budget=0,
+        **extra,
+    )
+
+
+def _invoke_with_retry(llm: ChatGoogleGenerativeAI, messages, label: str) -> str:
+    """Shared retry loop — returns raw response content string."""
     max_retries = settings.GEMINI_429_MAX_RETRIES
     last_error: Exception | None = None
+    config = RunnableConfig(run_name=label)
+
     for attempt in range(max_retries):
         try:
-            response = client.models.generate_content(model=model, contents=contents, config=config)
-            usage = getattr(response, "usage_metadata", None)
-            if usage:
-                print(
-                    f"[GEMINI] {label or 'call'} | "
-                    f"in={getattr(usage, 'prompt_token_count', '?')} "
-                    f"out={getattr(usage, 'candidates_token_count', '?')} "
-                    f"total={getattr(usage, 'total_token_count', '?')} tokens",
-                    flush=True,
+            response = llm.invoke(messages, config=config)
+            content = response.content
+            if isinstance(content, list):
+                content = "".join(
+                    part.get("text", "") if isinstance(part, dict) else str(part)
+                    for part in content
                 )
-            return response.text or ""
+            return content or ""
         except Exception as e:
             last_error = e
             if _is_rate_limit(e):
-                _log_429(e, attempt)
+                logger.warning("429 RESOURCE_EXHAUSTED (attempt %s): %s", attempt + 1, e)
                 if attempt < max_retries - 1:
                     backoff = _backoff_seconds(attempt)
                     logger.warning("Retrying %s/%s in %.1f s...", attempt + 1, max_retries, backoff)
@@ -82,24 +86,27 @@ def _call_with_retry(client: genai.Client, model: str, contents, config: types.G
 
 
 def generate_structured(prompt: str, response_schema: dict, label: str = "structured") -> dict:
-    """Call Gemini with a JSON schema to get reliable structured output."""
-    client = _get_client()
-    config = types.GenerateContentConfig(
+    """Call Gemini with a JSON schema — returns a parsed dict/list.
+    Traced in LangSmith via run_name=label.
+    """
+    import json
+
+    llm = _make_llm(
+        temperature=0.3,
         response_mime_type="application/json",
         response_schema=response_schema,
-        temperature=0.3,
-        thinking_config=types.ThinkingConfig(thinking_budget=0),
     )
-    text = _call_with_retry(client, settings.GEMINI_MODEL, prompt, config, label=label)
+    text = _invoke_with_retry(llm, prompt, label=label)
     return json.loads(text.strip())
 
 
 def generate_text(system_prompt: str, user_prompt: str, temperature: float = 0.7, label: str = "text") -> str:
-    """Call Gemini for free-text completion (narrative writing, Q&A)."""
-    client = _get_client()
-    config = types.GenerateContentConfig(
-        system_instruction=system_prompt,
-        temperature=temperature,
-        thinking_config=types.ThinkingConfig(thinking_budget=0),
-    )
-    return _call_with_retry(client, settings.GEMINI_MODEL, user_prompt, config, label=label).strip()
+    """Call Gemini for free-text completion.
+    Traced in LangSmith via run_name=label.
+    """
+    llm = _make_llm(temperature=temperature)
+    messages = [
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=user_prompt),
+    ]
+    return _invoke_with_retry(llm, messages, label=label).strip()

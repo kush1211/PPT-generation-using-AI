@@ -13,6 +13,9 @@ ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 VERTEX_AI_API_KEY = os.getenv('VERTEX_AI_API_KEY', '')
 GEMINI_MODEL = os.getenv('GEMINI_MODEL', 'gemini-2.5-flash')
 
+# LangSmith tracing — read directly by the langsmith SDK from env
+# Set LANGCHAIN_TRACING_V2=true and LANGCHAIN_API_KEY in .env to enable tracing
+
 def _int_env(name: str, default: int) -> int:
     try:
         return int(os.getenv(name, str(default)))
