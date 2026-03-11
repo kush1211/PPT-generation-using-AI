@@ -153,6 +153,22 @@ class Slide(models.Model):
         return f"Slide {self.slide_index}: {self.title}"
 
 
+class TokenUsageLog(models.Model):
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name='token_usage_logs')
+    input_tokens = models.IntegerField(default=0)
+    output_tokens = models.IntegerField(default=0)
+    total_tokens = models.IntegerField(default=0)
+    slide_count = models.IntegerField(default=0)
+    duration_seconds = models.FloatField(default=0.0)
+    created_at = models.DateTimeField(auto_now_add=True)  # stored UTC, API returns IST
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"TokenUsageLog [{self.project}] total={self.total_tokens} slides={self.slide_count}"
+
+
 class ChatMessage(models.Model):
     ROLE_CHOICES = [('user', 'User'), ('assistant', 'Assistant')]
 

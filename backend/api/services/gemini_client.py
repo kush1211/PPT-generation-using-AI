@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import random
+import threading
 import time
 
 from google import genai
@@ -21,6 +22,34 @@ from langchain_core.runnables import RunnableConfig
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
+
+# ── Thread-local token accumulator ────────────────────────────────────────────
+_token_acc = threading.local()
+
+
+def start_token_tracking() -> None:
+    """Reset the per-pipeline token counters on this thread."""
+    _token_acc.input_tokens = 0
+    _token_acc.output_tokens = 0
+    _token_acc.total_tokens = 0
+
+
+def get_token_totals() -> dict:
+    """Return accumulated token counts for this thread."""
+    return {
+        "input_tokens": getattr(_token_acc, "input_tokens", 0),
+        "output_tokens": getattr(_token_acc, "output_tokens", 0),
+        "total_tokens": getattr(_token_acc, "total_tokens", 0),
+    }
+
+
+def _accumulate_usage(response) -> None:
+    """Add token counts from a LangChain AIMessage to the thread accumulator."""
+    usage = getattr(response, "usage_metadata", None) or {}
+    getattr(_token_acc, "input_tokens", None)  # touch to init if missing
+    _token_acc.input_tokens = getattr(_token_acc, "input_tokens", 0) + usage.get("input_tokens", 0)
+    _token_acc.output_tokens = getattr(_token_acc, "output_tokens", 0) + usage.get("output_tokens", 0)
+    _token_acc.total_tokens = getattr(_token_acc, "total_tokens", 0) + usage.get("total_tokens", 0)
 
 
 def _backoff_seconds(attempt: int) -> float:
@@ -63,6 +92,7 @@ def _invoke_with_retry(llm: ChatGoogleGenerativeAI, messages, label: str) -> str
     for attempt in range(max_retries):
         try:
             response = llm.invoke(messages, config=config)
+            _accumulate_usage(response)
             content = response.content
             if isinstance(content, list):
                 content = "".join(

@@ -12,7 +12,7 @@ from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 
 from .models import (
     Project, DataFile, RFPDocument, ObjectivesConfig,
-    BriefDecomposition, SheetGroup, Insight, Slide, ChatMessage,
+    BriefDecomposition, SheetGroup, Insight, Slide, ChatMessage, TokenUsageLog,
 )
 from .serializers import (
     ProjectSerializer, ProjectCreateSerializer, DataFileSerializer,
@@ -453,3 +453,29 @@ class PdfExportView(APIView):
         response = HttpResponse(pdf_bytes, content_type='application/pdf')
         response['Content-Disposition'] = f'attachment; filename="presentation_{pk}.pdf"'
         return response
+
+
+class TokenUsageLogView(APIView):
+    """GET /api/token-usage/  — list all token usage logs, newest first.
+    Each entry represents one full generation pipeline run.
+    created_at_ist is the timestamp converted to Asia/Kolkata (IST = UTC+5:30).
+    """
+    def get(self, request):
+        from datetime import timezone, timedelta
+        IST = timezone(timedelta(hours=5, minutes=30))
+        logs = TokenUsageLog.objects.select_related('project').order_by('-created_at')
+        data = [
+            {
+                "id": log.id,
+                "project_id": str(log.project_id),
+                "project_title": log.project.title or "Untitled",
+                "input_tokens": log.input_tokens,
+                "output_tokens": log.output_tokens,
+                "total_tokens": log.total_tokens,
+                "slide_count": log.slide_count,
+                "duration_seconds": log.duration_seconds,
+                "created_at_ist": log.created_at.astimezone(IST).strftime("%Y-%m-%d %H:%M:%S IST"),
+            }
+            for log in logs
+        ]
+        return Response(data)

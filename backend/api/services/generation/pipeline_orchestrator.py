@@ -14,6 +14,7 @@ from typing import Any, TypedDict
 from django.conf import settings
 from langgraph.graph import StateGraph, END
 
+from ..gemini_client import start_token_tracking, get_token_totals
 from ..data_ingestion.multi_sheet_loader import load_all_sheets
 from ..data_ingestion.relationship_discovery import discover_relationships
 from ..data_ingestion.summary_profiler import profile_groups
@@ -367,7 +368,11 @@ def run_generation_pipeline(project) -> dict:
     """Run the full generation pipeline via LangGraph.
     Called by GenerateView.post().
     """
+    from api.models import TokenUsageLog
+
     t0 = time.time()
+    start_token_tracking()
+
     file_path = str(settings.MEDIA_ROOT / project.data_file.file.name)
 
     initial_state: PipelineState = {
@@ -386,8 +391,26 @@ def run_generation_pipeline(project) -> dict:
     }
 
     final_state = _pipeline.invoke(initial_state)
-    logger.info("Total pipeline time: %.1fs", time.time() - t0)
-    return final_state["result"]
+    duration = time.time() - t0
+    result = final_state["result"]
+
+    token_totals = get_token_totals()
+    TokenUsageLog.objects.create(
+        project=project,
+        input_tokens=token_totals["input_tokens"],
+        output_tokens=token_totals["output_tokens"],
+        total_tokens=token_totals["total_tokens"],
+        slide_count=result.get("slide_count", 0),
+        duration_seconds=round(duration, 2),
+    )
+    logger.info(
+        "Total pipeline time: %.1fs | tokens in=%d out=%d total=%d",
+        duration,
+        token_totals["input_tokens"],
+        token_totals["output_tokens"],
+        token_totals["total_tokens"],
+    )
+    return result
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────

@@ -4,10 +4,11 @@ from .views import (
     UploadDataView, UploadDocumentView, ProfileView,
     InferObjectivesView, ObjectivesView,
     GenerateView, SlidesView, DownloadView,
-    ChatView, PdfExportView,
+    ChatView, PdfExportView, TokenUsageLogView,
 )
 
 urlpatterns = [
+    path('token-usage/', TokenUsageLogView.as_view(), name='token-usage'),
     path('projects/', ProjectListCreateView.as_view(), name='projects'),
     path('projects/<uuid:pk>/', ProjectDetailView.as_view(), name='project-detail'),
     path('projects/<uuid:pk>/upload-data/', UploadDataView.as_view(), name='upload-data'),
